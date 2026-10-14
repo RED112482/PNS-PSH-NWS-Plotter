@@ -1,0 +1,1 @@
+{"name":"pns-psh-nws-plotter","version":"1.0.0","private":true,"description":"Browser-based NWS PNS and PSH observation plotter","scripts":{"test":"node --check app.js && node --check data-service.js && node --test tests/*.test.cjs","serve":"python3 -m http.server 8000"}}
