@@ -251,7 +251,7 @@ function draw(){
  const token=++renderToken;fillBuild={key,token};status('Building sharp interpolation…');
  buildFill(rows,kind,p,reach,key,token).catch(e=>{if(token===renderToken)status('Fill rendering failed: '+e.message);}).finally(()=>{if(fillBuild?.token===token){fillBuild=null;requestContours();}});
 }
-$('contours').onchange=requestContours;$('pressureContourStep').onchange=requestContours;
+$('contours').onchange=()=>{if(!data&&globalThis.DatOverlay?.selected().length){if($('contours').checked)DatOverlay.plotDensity();else{$('datDensityOn').checked=false;$('datDensityOn').dispatchEvent(new Event('change'));}return;}requestContours();};$('pressureContourStep').onchange=requestContours;
 ['kind','power','neighbors','reach','fill','blendColors','labels','clip','fillQuality'].forEach(id=>$(id).onchange=()=>{if(id==='kind'){selected=null;$('editor').hidden=true;renderList();}draw();});map.on('moveend',()=>{clearTimeout(drawTimer);drawTimer=setTimeout(renderCities,80);});
 function kmlEscape(value){return String(value??'').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));}
 function kmlColor(hex,opacity=1){return Math.round(Math.max(0,Math.min(1,opacity))*255).toString(16).padStart(2,'0')+hex.slice(5,7)+hex.slice(3,5)+hex.slice(1,3);}

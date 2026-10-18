@@ -3,10 +3,10 @@
 'use strict';
 const state={points:[],name:'',markers:L.layerGroup().addTo(map),fill:null,lines:null,features:[],labels:[],token:0,ready:false,canvas:null,bounds:null,timer:null,pending:false,loadToken:0};
 map.createPane('datPoints');map.getPane('datPoints').style.zIndex=640;
-map.createPane('datDensity');map.getPane('datDensity').style.zIndex=450;map.getPane('datDensity').style.pointerEvents='none';
-map.createPane('datContours');map.getPane('datContours').style.zIndex=570;map.getPane('datContours').style.pointerEvents='none';
+map.createPane('datDensity');map.getPane('datDensity').style.zIndex=550;map.getPane('datDensity').style.pointerEvents='none';
+map.createPane('datContours');map.getPane('datContours').style.zIndex=580;map.getPane('datContours').style.pointerEvents='none';
 const legend=L.control({position:'bottomleft'});legend.onAdd=()=>{const n=L.DomUtil.create('div','dat-legend');n.id='datLegend';n.hidden=true;L.DomEvent.disableClickPropagation(n);return n;};legend.addTo(map);
-const note=s=>$('datStatus').textContent=s;
+const note=s=>{$('datStatus').textContent=s;$('datDensityStatus').textContent=s;};
 function selected(){return state.points.filter(p=>$(p.type==='tropical'?'datTropical':p.type==='tornado'?'datTornado':'datOther').checked);}
 function size(){return Number($('datSize').value);}
 function updateLegend(){
@@ -25,7 +25,7 @@ function renderPoints(){
 function clearDensity(){state.token++;state.ready=false;state.pending=false;if(state.fill){map.removeLayer(state.fill);state.fill=null;}if(state.lines){map.removeLayer(state.lines);state.lines=null;}state.features=[];state.labels=[];state.canvas=null;state.bounds=null;}
 async function density(){
  clearDensity();const points=selected(),token=state.token;if(!$('datDensityOn').checked||!points.length){updateLegend();note(points.length+' selected DAT points. Density is '+($('datDensityOn').checked?'waiting for points.':'off.'));return;}state.pending=true;
- note('Calculating DAT survey-point density…');
+ note('Calculating DAT survey-point density…');$('datAdjust').open=true;
  const field=DatTools.densitySetup(points,Number($('datBandwidth').value)),bounds=L.latLngBounds([field.south,field.west],[field.north,field.east]),nw=map.project(bounds.getNorthWest(),0),se=map.project(bounds.getSouthEast(),0),width=256,height=Math.max(64,Math.min(384,Math.round(width*(se.y-nw.y)/(se.x-nw.x))));
  const xs=Array.from({length:width},(_,x)=>map.unproject(L.point(nw.x+(x+.5)/width*(se.x-nw.x),nw.y),0).lng),ys=Array.from({length:height},(_,y)=>map.unproject(L.point(nw.x,nw.y+(y+.5)/height*(se.y-nw.y)),0).lat),values=new Float32Array(width*height);let max=0;
  for(let y=0;y<height;){const end=Math.min(height,y+8);for(;y<end;y++)for(let x=0;x<width;x++){const v=field.estimate(ys[y],xs[x]);values[y*width+x]=v;max=Math.max(max,v);}await new Promise(r=>setTimeout(r,0));if(token!==state.token)return;}
@@ -45,13 +45,20 @@ async function density(){
  const boxes=[];labels.forEach(p=>{const q=map.latLngToContainerPoint([p.lat,displayLon(p.lon)]);if(boxes.some(b=>Math.abs(b.x-q.x)<85&&Math.abs(b.y-q.y)<20))return;boxes.push(q);L.marker([p.lat,displayLon(p.lon)],{pane:'datContours',interactive:false,icon:L.divIcon({className:'contour-label',html:esc(p.text),iconSize:[100,18],iconAnchor:[40,9]})}).addTo(state.lines);});
  updateLegend();note(points.length+' DAT points; peak density '+Number(max.toPrecision(3))+'/km². Contour interval '+Number(actual.toPrecision(3))+'/km².'+(requested>0&&actual>requested?' Interval increased to keep at most 100 contour levels.':''));
 }
-function queueDensity(){clearDensity();clearTimeout(state.timer);state.timer=setTimeout(()=>density().catch(e=>{state.pending=false;note(e.message);}),180);}
+function queueDensity(){clearDensity();clearTimeout(state.timer);if($('datDensityOn').checked){state.pending=true;note('Preparing DAT density…');}state.timer=setTimeout(()=>density().catch(e=>{state.pending=false;note('DAT density could not be drawn: '+e.message);}),180);}
 $('datLoad').onclick=async()=>{
  const loading=++state.loadToken;try{const file=$('datFile').files[0];$('datLoad').disabled=true;note('Reading DAT KML/KMZ…');const result=await DatTools.readFile(file);if(loading!==state.loadToken)return;state.points=result.points;state.name=file.name;renderPoints();queueDensity();note(result.points.length+' DAT points imported: '+(result.counts.tropical||0)+' tropical, '+(result.counts.tornado||0)+' tornado, '+(result.counts.other||0)+' other/unrated. '+result.skipped+' invalid coordinates skipped.');}
  catch(e){note(e.message);}finally{$('datLoad').disabled=false;}
 };
 $('datClear').onclick=()=>{state.loadToken++;state.points=[];state.name='';clearTimeout(state.timer);clearDensity();renderPoints();note('DAT overlay cleared.');};
 $('datFit').onclick=()=>{const points=selected();if(points.length)map.fitBounds(L.latLngBounds(points.map(p=>[p.lat,displayLon(p.lon)])),{padding:[25,25],maxZoom:13});else note('Import DAT points and select a type first.');};
+function plotDensity(){
+ if(!state.points.length){note('Import a DAT KML/KMZ file first, then select Plot DAT density.');return;}
+ if(!selected().length){note('Select at least one DAT damage type.');return;}
+ $('datDensityOn').checked=true;$('datDensityFill').checked=true;$('datDensityContours').checked=true;$('adjustMap').open=true;$('datAdjust').open=true;
+ $('datFit').onclick();queueDensity();
+}
+$('datPlotDensity').onclick=plotDensity;
 $('datSize').oninput=renderPoints;$('datShow').onchange=renderPoints;
 ['datTropical','datTornado','datOther'].forEach(id=>$(id).onchange=()=>{renderPoints();queueDensity();});
 ['datDensityOn','datDensityContours','datDensityFill','datBandwidth','datInterval'].forEach(id=>$(id).onchange=queueDensity);
@@ -64,6 +71,6 @@ function drawDensity(ctx,project){
 function drawPoints(ctx,project){
  if(!$('datShow').checked)return;ctx.save();selected().forEach(p=>{const [x,y]=project(p.lon,p.lat),r=size()/2;ctx.beginPath();if(p.type==='tornado'){ctx.moveTo(x-r,y-r);ctx.lineTo(x+r,y-r);ctx.lineTo(x,y+r);ctx.closePath();}else ctx.arc(x,y,r,0,2*Math.PI);ctx.fillStyle=p.color;ctx.fill();ctx.strokeStyle='#263344';ctx.lineWidth=1;ctx.stroke();});ctx.restore();
 }
-window.DatOverlay={state,selected,renderPoints,drawDensity,drawPoints};
+window.DatOverlay={state,selected,renderPoints,drawDensity,drawPoints,plotDensity};
 
 })();

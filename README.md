@@ -47,7 +47,7 @@ Gradient KML files can be large because each distinct color is polygonized. Choo
 
 ## DAT survey-point overlays
 
-Data Ingest → DAT — Damage Assessment Toolkit accepts local KML and KMZ files. Click Plot DAT points, then Zoom to DAT points if needed. DAT is independent of the loaded PNS/PSH dataset and remains overlaid when that dataset changes. Importing another DAT file replaces the previous DAT overlay; Clear DAT overlay removes it.
+Data Ingest → DAT — Damage Assessment Toolkit accepts local KML and KMZ files. Click Plot DAT points, then Plot DAT density to explicitly enable the density fill and contour lines and zoom to the survey. Zoom to DAT points is also available separately. DAT is independent of the loaded PNS/PSH dataset and remains overlaid when that dataset changes. Importing another DAT file replaces the previous DAT overlay; Clear DAT overlay removes it.
 
 Under Adjust Map → DAT points and density:
 
@@ -60,3 +60,5 @@ Under Adjust Map → DAT points and density:
 - Map PNG includes visible DAT points and enabled density layers, even with no PNS/PSH loaded. Existing CSV, Top 10 and KML exports continue to export PNS/PSH observations, not DAT.
 
 The sample KMZ was checked locally: 345 valid points, 344 Tropical and one unrated. The supplied file is not committed to the repository. JSZip is bundled locally in vendor/ with its license for KMZ reading; there is no additional runtime CDN dependency.
+
+DAT density activation: Plot DAT density enables both fill and contours, opens the relevant controls and fits the selected survey points. Progress/errors are shown both at ingestion and beside the density toggle. The general contour checkbox is labeled PNS/PSH; when no PNS/PSH dataset is loaded, it also forwards to DAT density for convenience. Density renders above normal observation fills. Updated script URLs bypass stale browser copies after deployment.
