@@ -39,8 +39,24 @@ Interpolation represents station reports/extrema, not measured conditions everyw
 
 Serve this directory using python3 -m http.server 8000, then open http://localhost:8000/. Do not open index.html directly with a file URL.
 
-Run npm test (Node 22+; no npm dependencies). GitHub Actions runs the same checks on pushes and pull requests.
+Run npm ci, then npm test (Node 22+; dependencies are for tests and bundling JSZip). GitHub Actions runs the same checks on pushes and pull requests.
 
 Files: index.html, styles.css, app.js (UI/interpolation/export), data-service.js (PNS parsing, APIs, coordinate storage), and tests/.
 
 Gradient KML files can be large because each distinct color is polygonized. Choose Fast 512 px for smaller exports. Contour tracing samples the field at up to 512 columns, with 3 mb pressure levels anchored at 1000 mb. Map PNG intentionally omits basemap tiles; Google Earth KML contains the color field, retained observations and enabled contours.
+
+## DAT survey-point overlays
+
+Data Ingest → DAT — Damage Assessment Toolkit accepts local KML and KMZ files. Click Plot DAT points, then Zoom to DAT points if needed. DAT is independent of the loaded PNS/PSH dataset and remains overlaid when that dataset changes. Importing another DAT file replaces the previous DAT overlay; Clear DAT overlay removes it.
+
+Under Adjust Map → DAT points and density:
+
+- Resize point diameter from 6–40 px; show/hide points and filter Tropical wind / Tornadoes / Other.
+- Tropical reports are yellow circles; tornadoes use downward triangles colored from the KML's EF styles or EF icon references. Unknown/unrated points are gray.
+- Enable Contour DAT point density for a Gaussian density field in survey points/km². Adjust smoothing (0.5–50 km, default 5), contour interval (0 = automatic), fill, contour lines/labels, and opacity.
+- Density counts each valid selected Point placemark equally, including collocated records. It does not use estimated wind or EF rating as a numeric weight. Survey coverage affects apparent concentrations. Other/unrated records are included by default and can be filtered out.
+- Density is evaluated on a 256-column raster with a three-bandwidth Gaussian cutoff. Contour interval may be increased if more than 100 levels would be generated. Panning reuses the result. DAT density is not CWA-clipped.
+- Point popups show imported attributes as text. KML coordinates are authoritative; descriptions and ExtendedData supply ratings and damage attributes. Polygon/track-only placemarks are not converted to points. The main KML inside KMZ is read; image/photos and network links are not fetched.
+- Map PNG includes visible DAT points and enabled density layers, even with no PNS/PSH loaded. Existing CSV, Top 10 and KML exports continue to export PNS/PSH observations, not DAT.
+
+The sample KMZ was checked locally: 345 valid points, 344 Tropical and one unrated. The supplied file is not committed to the repository. JSZip is bundled locally in vendor/ with its license for KMZ reading; there is no additional runtime CDN dependency.

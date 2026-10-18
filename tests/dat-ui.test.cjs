@@ -1,0 +1,11 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+test('DAT overlay imports independently, resizes symbols, filters types and clears',async()=>{
+ const rows=[{lat:31,lon:-88,type:'tropical',name:'Tropical',color:'#ffdf00',fields:{comments:'<img src=x onerror=alert(1)>'}},{lat:31.1,lon:-88,type:'tornado',rating:'EF2',name:'Tornado',color:'#ffee02',fields:{}},{lat:31.2,lon:-88,type:'other',name:'N/A',color:'#999999',fields:{}}],els=new Proxy({datFile:{files:[{name:'test.kmz'}]},datSize:{value:18},datOpacity:{value:55},datDensityOn:{checked:false}},{get:(o,k)=>o[k]||(o[k]={checked:true})}),panes={},groups=[];
+ const context={$:id=>els[id],displayLon:x=>x,esc:x=>String(x).replace(/</g,'&lt;').replace(/>/g,'&gt;'),setTimeout:()=>1,clearTimeout:()=>{},DatTools:{readFile:async()=>({points:rows,counts:{tropical:1,tornado:1,other:1},skipped:0})},map:{createPane:n=>panes[n]={style:{}},getPane:n=>panes[n],fitBounds:()=>{context.fit=true;}},L:{layerGroup:()=>{const g={items:[],addTo(){return this},clearLayers(){this.items=[];}};groups.push(g);return g;},control:()=>({addTo(){this.onAdd();return this;}}),DomUtil:{create:()=>({})},DomEvent:{disableClickPropagation:()=>{}},divIcon:x=>x,marker:(latlon,opts)=>({opts,bindPopup(html){this.popup=html;return this},addTo(g){g.items.push(this);return this}}),latLngBounds:x=>x}};
+ context.window=context;vm.createContext(context);vm.runInContext(fs.readFileSync('dat-ui.js','utf8'),context);await els.datLoad.onclick();
+ assert.equal(context.DatOverlay.state.points.length,3);assert.equal(groups[0].items.length,3);assert(groups[0].items[0].opts.icon.html.includes('circle'));assert(groups[0].items[1].opts.icon.html.includes('L12 22'));assert(groups[0].items[0].popup.includes('&lt;img'));
+ els.datSize.value=30;els.datSize.oninput();assert.equal(groups[0].items[0].opts.icon.iconSize[0],30);
+ els.datTornado.checked=false;els.datTornado.onchange();assert.equal(context.DatOverlay.selected().length,2);assert.equal(groups[0].items.length,2);
+ els.datFit.onclick();assert(context.fit);els.datShow.checked=false;els.datShow.onchange();assert.equal(groups[0].items.length,0);
+ els.datClear.onclick();assert.equal(context.DatOverlay.state.points.length,0);
+});
