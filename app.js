@@ -330,20 +330,21 @@ function updateOfficeSource(){const o=officeCode();$('office').value=o;$('nwsLin
 function showCountyLayer(){if(countyLayer){map.removeLayer(countyLayer);countyLayer=null;}if(!$('counties').checked||!countyData)return;countyLayer=L.geoJSON(countyData,{pane:'referenceOutlines',renderer:outlineRenderer,interactive:false,style:{color:'#000000',weight:1.3,fill:false},onEachFeature:(f,l)=>l.bindTooltip(esc((f.properties.countyname||'')+', '+(f.properties.state||'')))}).addTo(map);if(boundaryLayer)boundaryLayer.bringToFront();}
 $('counties').onchange=showCountyLayer;
 async function loadOfficeMap(office){
- const epoch=++contextEpoch;contextOffice=office;boundary=null;countyData=null;wrapOffice=false;cities=office==='MOB'?mobCityFallback:[];
- if(boundaryLayer){map.removeLayer(boundaryLayer);boundaryLayer=null;}showCountyLayer();renderCities();if(data)draw();
+ const changingOffice=contextOffice!==office,epoch=++contextEpoch;contextOffice=office;
+ if(changingOffice){boundary=null;countyData=null;wrapOffice=false;cities=office==='MOB'?mobCityFallback:[];if(boundaryLayer){map.removeLayer(boundaryLayer);boundaryLayer=null;}showCountyLayer();renderCities();}
+ if(data)draw();
  $('outlineStatus').textContent='Loading county and CWA outlines…';
  try{
   // A failed CWA query must not prevent county retrieval.
   const results=await Promise.allSettled([call('getBoundary',office),call('getCounties',office)]);if(epoch!==contextEpoch)return;
   const errors=[];
-  if(results[0].status==='fulfilled'){const b=results[0].value;wrapOffice=spansDateline(b);boundary=unwrapOffice(b);boundaryLayer=L.geoJSON(boundary,{pane:'referenceOutlines',renderer:outlineRenderer,interactive:false,style:{color:'#e73d42',weight:2,fill:false}}).addTo(map);map.fitBounds(boundaryLayer.getBounds());}
-  else errors.push('CWA outline unavailable: '+results[0].reason.message);
+  if(results[0].status==='fulfilled'){const b=results[0].value;wrapOffice=spansDateline(b);boundary=unwrapOffice(b);const previousBoundary=boundaryLayer;boundaryLayer=L.geoJSON(boundary,{pane:'referenceOutlines',renderer:outlineRenderer,interactive:false,style:{color:'#e73d42',weight:2,fill:false}}).addTo(map);if(previousBoundary)map.removeLayer(previousBoundary);if(changingOffice)map.fitBounds(boundaryLayer.getBounds());}
+  else errors.push((boundary?'Keeping previous CWA outline. ':'CWA outline unavailable: ')+results[0].reason.message);
   if(results[1].status==='fulfilled'&&results[1].value.features?.length){countyData=unwrapOffice(results[1].value);showCountyLayer();}
-  else errors.push('County outlines unavailable: '+(results[1].status==='rejected'?results[1].reason.message:'no county geometry returned'));
+  else errors.push((countyData?'Keeping previous county outlines. ':'County outlines unavailable: ')+(results[1].status==='rejected'?results[1].reason.message:'no county geometry returned'));
   $('outlineStatus').textContent=(countyData?countyData.features.length+' county outlines loaded. ':'')+errors.join(' ');draw();
   const bounds=(boundaryLayer||countyLayer)?.getBounds();
-  if(bounds){try{cities=await call('getCities',[bounds.getWest(),bounds.getSouth(),bounds.getEast(),bounds.getNorth()]);if(epoch!==contextEpoch)return;renderCities();$('cityStatus').textContent='';}catch(e){if(epoch!==contextEpoch)return;$('cityStatus').textContent='City layer unavailable: '+e.message;}}
+  if(bounds){try{const loadedCities=await call('getCities',[bounds.getWest(),bounds.getSouth(),bounds.getEast(),bounds.getNorth()]);if(epoch!==contextEpoch)return;cities=loadedCities;renderCities();$('cityStatus').textContent='';}catch(e){if(epoch!==contextEpoch)return;$('cityStatus').textContent='City layer unavailable: '+e.message;}}
  }catch(e){if(epoch!==contextEpoch)return;$('outlineStatus').textContent='Outline display failed: '+e.message;draw();}
 }
 $('reloadOutlines').onclick=()=>loadOfficeMap(officeCode());

@@ -14,7 +14,17 @@ function parseInput(input){const u=new URL(String(input).trim());if(u.protocol!=
 async function fetchPns(input){const {office,version}=parseInput(input);await getPnsVersions(office);const p=await productFor(office,version),result=parsePns_(p.productText,undefined,office);result.url=officeUrl_(office,version);result.apiId=p.id;result.apiUrl='https://api.weather.gov/products/'+p.id;result.metadata.searchNote='Fetched from the NWS API. API version order/retention may differ from the weather.gov source page.';if(!result.issued)result.issued=p.issuanceTime;return result;}
 async function scanPnsBatch(office,versions){office=office_(office);if(!Array.isArray(versions)||versions.length>8||versions.some(v=>!Number.isInteger(v)||v<1||v>50))throw Error('Scan up to eight valid API versions.');return Promise.all(versions.map(async version=>{try{const p=await productFor(office,version),m=parseMetadata_(p.productText);return {office,version,url:officeUrl_(office,version),headline:(p.productText.match(/\.{3}([^\n]+?)\.{3}/)||[])[1]||'Public Information Statement',issued:p.issuanceTime,signature:signature_(p.productText),count:m.records.length,detected:m.detected,codes:[...new Set(m.records.map(r=>r.reportCode))],status:m.records.length?'ready':m.detected?'metadata has no supported valid records':'no metadata'};}catch(e){return {office,version,count:0,error:e.message,status:'unavailable',headline:'Unavailable'};}}));}
 async function searchMetadataForProduct(input,originalText){const d=await fetchPns(input);if(signature_(d.text)!==signature_(String(originalText)))throw Error('This version now points to a different issuance. Reload the product before searching for metadata.');return d;}
-async function getBoundary(office){office=office_(office||'MOB');const d=await jsonFetch_('https://mapservices.weather.noaa.gov/static/rest/services/nws_reference_maps/nws_reference_map/MapServer/1/query?where='+encodeURIComponent("cwa='"+office+"'")+'&outFields=cwa&returnGeometry=true&outSR=4326&f=geojson');if(!d.features?.length)throw Error('No CWA boundary returned for '+office);return d;}
+function validateOutline_(value){if(value?.type!=='FeatureCollection'||!value.features?.length)throw Error('No reference geometry returned.');return value;}
+async function referenceOutline_(kind,office,url){
+ const key='pns-psh-reference-'+office+'-'+kind;let failure;
+ function remember(value){validateOutline_(value);try{localStorage.setItem(key,JSON.stringify(value));}catch(e){}return value;}
+ // Mobile uses same-origin reference files and does not depend on ArcGIS availability.
+ if(office==='MOB'){try{return remember(await jsonFetch_('./assets/MOB-'+(kind==='cwa'?'cwa':'counties')+'.geojson'));}catch(e){failure=e;}}
+ try{return remember(await jsonFetch_(url));}catch(e){failure=e;}
+ try{const cached=JSON.parse(localStorage.getItem(key)||'null');return validateOutline_(cached);}catch(e){}
+ throw failure||Error('Reference outlines unavailable.');
+}
+async function getBoundary(office){office=office_(office||'MOB');const d=await referenceOutline_('cwa',office,'https://mapservices.weather.noaa.gov/static/rest/services/nws_reference_maps/nws_reference_map/MapServer/1/query?where='+encodeURIComponent("cwa='"+office+"'")+'&outFields=cwa&returnGeometry=true&outSR=4326&f=geojson');if(!d.features?.length)throw Error('No CWA boundary returned for '+office);return d;}
 function office_(office){office=String(office||'MOB').trim().toUpperCase();if(!/^[A-Z]{3}$/.test(office))throw new Error('Enter a three-letter NWS office, such as MOB, LIX or TAE.');return office;}
 function officeFromUrl_(url){var m=String(url).match(/[?&]issuedby=([a-z]{3})(?:&|$)/i);return m?m[1].toUpperCase():'MOB';}
 function officeUrl_(office,version){office=office_(office);return 'https://forecast.weather.gov/product.php?site='+office+'&issuedby='+office+'&product=PNS&format=txt&version='+version+'&glossary=0';}
@@ -92,7 +102,7 @@ function applyMetadata(text,metadata,office) {
 }
 function boundsOf_(boundary){var xmin=180,ymin=90,xmax=-180,ymax=-90;function visit(a){if(typeof a[0]==='number'){xmin=Math.min(xmin,a[0]);xmax=Math.max(xmax,a[0]);ymin=Math.min(ymin,a[1]);ymax=Math.max(ymax,a[1]);}else a.forEach(visit);}boundary.features.forEach(function(f){visit(f.geometry.coordinates);});return [xmin,ymin,xmax,ymax];}
 async function getCounties(office){
-  office=office_(office);return jsonFetch_('https://mapservices.weather.noaa.gov/static/rest/services/nws_reference_maps/nws_reference_map/MapServer/2/query?where='+encodeURIComponent("cwa='"+office+"'")+'&outFields=countyname,state,fips&returnGeometry=true&outSR=4326&maxAllowableOffset=0.002&f=geojson');
+  office=office_(office);return referenceOutline_('counties',office,'https://mapservices.weather.noaa.gov/static/rest/services/nws_reference_maps/nws_reference_map/MapServer/2/query?where='+encodeURIComponent("cwa='"+office+"'")+'&outFields=countyname,state,fips&returnGeometry=true&outSR=4326&maxAllowableOffset=0.002&f=geojson');
 }
 async function getCities(bounds){
   if(!Array.isArray(bounds)||bounds.length!==4||!bounds.every(function(n){return Number.isFinite(n);}))throw new Error('Invalid city-query bounds.');

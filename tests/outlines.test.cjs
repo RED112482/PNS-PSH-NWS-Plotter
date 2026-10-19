@@ -10,3 +10,9 @@ test('counties still load when the CWA request fails',async()=>{
  vm.createContext(c);vm.runInContext(s.slice(s.indexOf('async function loadOfficeMap('),s.indexOf('function updateProductList(')),c);
  await c.loadOfficeMap('MOB');assert(calls.includes('getCounties'));assert(c.countyData);assert(c.countyLayer);assert(el.outlineStatus.textContent.includes('1 county outlines loaded'));assert(el.outlineStatus.textContent.includes('CWA outline unavailable'));
 });
+test('same-office outline refresh preserves visible geometry if both requests fail',async()=>{
+ const oldBoundary={features:[{}]},oldCounties={features:[{}]},box={getWest:()=>-89,getEast:()=>-87,getSouth:()=>30,getNorth:()=>32},oldLayer={getBounds:()=>box},el={outlineStatus:{},cityStatus:{},reloadOutlines:{}},removed=[];
+ const c={$:id=>el[id],contextEpoch:1,contextOffice:'MOB',boundary:oldBoundary,countyData:oldCounties,wrapOffice:false,cities:[],mobCityFallback:[],boundaryLayer:oldLayer,countyLayer:{getBounds:()=>box},data:null,map:{removeLayer:layer=>removed.push(layer)},showCountyLayer:()=>{},renderCities:()=>{},draw:()=>{},officeCode:()=> 'MOB',call:async name=>{if(name==='getCities')return [];throw Error('offline');}};
+ vm.createContext(c);vm.runInContext(s.slice(s.indexOf('async function loadOfficeMap('),s.indexOf('function updateProductList(')),c);
+ await c.loadOfficeMap('MOB');assert.strictEqual(c.boundary,oldBoundary);assert.strictEqual(c.countyData,oldCounties);assert.strictEqual(c.boundaryLayer,oldLayer);assert.equal(removed.length,0);assert(el.outlineStatus.textContent.includes('Keeping previous CWA'));assert(el.outlineStatus.textContent.includes('Keeping previous county'));
+});
