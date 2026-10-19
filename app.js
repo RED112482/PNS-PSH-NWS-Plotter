@@ -84,7 +84,8 @@ function reportPalette(kind){const p=palettes[kind];return kind==='wind'&&report
 function legendNumber(n){return Number(n.toFixed(1));}
 function refreshPshUnits(){if(data?.sourceType!=='PSH')return;data.rows.forEach(r=>{if(r.kind==='wind'){r.unit=$('pshMph').checked?'mph':'kt';r.value=$('pshMph').checked?Math.ceil(r.rawValue*KNOTS_TO_MPH):r.rawValue;}});const group=$('kind').value;[...$('kind').options].forEach(o=>o.textContent=groupLabel(o.value));$('kind').value=group;renderList();draw();}
 $('pshMph').onchange=refreshPshUnits;
-function loadPshText(text,name){const d=parsePshCsv(text,officeCode(),$('pshMph').checked,name);accept(d);$('pshStatus').textContent=d.pshSummary;}
+function loadPshText(text,name){const d=parsePshCsv(text,officeCode(),$('pshMph').checked,name);$('fill').checked=true;accept(d);$('pshStatus').textContent=d.pshSummary;}
+$('plotPshFill').onclick=()=>{if(data?.sourceType!=='PSH'){status('Upload or paste a PSH CSV first.');return;}$('fill').checked=true;if(fillOpacity()===0){$('fillIntensity').value=100;updateAppearanceReadouts();}$('adjustMap').open=true;draw();};
 $('loadPshPaste').onclick=()=>work(async()=>loadPshText($('pshPaste').value,'Pasted PSH CSV'));
 $('loadPshFile').onclick=()=>work(async()=>{const file=$('pshFile').files[0];if(!file)throw Error('Choose a CSV file first.');if(file.size>5*1024*1024)throw Error('Choose a CSV smaller than 5 MB.');loadPshText(await file.text(),file.name);});
 let topTenSnapshot=null;
@@ -213,6 +214,17 @@ async function updateContours(){
  contourPending=false;
 }
 function requestContours(){updateContours().catch(e=>{contourPending=false;clearContours();status('Contour rendering failed: '+e.message);});}
+function fillStatusMessage(rows,shaded){
+ if(!$('fill').checked)return 'Observation color fill is off. Enable Interpolated color fill or use Plot selected PSH color fill.';
+ if(rows.length<3)return rows.length+' located reports in this group; interpolation needs at least 3.';
+ const unit=reportUnit(),kind=reportKind(),fallback=$('clip').checked&&!boundary;
+ let message=shaded===0?'No fill cells have enough nearby reports'+($('clip').checked&&boundary?' inside this CWA':'')+'. Increase maximum reach or check coordinates/CWA clipping.':(kind==='wind'?'Wind':kind==='pressure'?'Pressure':'Precipitation')+' color fill '+(shaded===undefined?'building':'ready')+' ('+unit+'); '+rows.length+' located reports.';
+ if(fallback)message+=' CWA boundary is not available yet: showing the report area without CWA clipping. The map will clip automatically if the boundary loads.';
+ if(fillOpacity()===0)message+=' Fill intensity is 0%; increase it to see colors.';
+ if(globalThis.DatOverlay?.state.ready&&$('datDensityOn')?.checked&&$('datDensityFill')?.checked)message+=' DAT density fill is also enabled above this layer.';
+ return message;
+}
+function showFillStatus(rows,shaded){const message=fillStatusMessage(rows,shaded);$('fillStatus').textContent=message;return message;}
 function installFill(){
  if(overlay)map.removeLayer(overlay);
  overlay=L.imageOverlay(canvas.toDataURL(),overlayBounds,{interactive:false,opacity:fillOpacity(),className:$('blendColors').checked?'blended-fill':''}).addTo(map);overlay.bringToBack();
@@ -227,15 +239,15 @@ async function buildFill(rows,kind,p,reach,key,token){
  const xs=new Float64Array(width),ys=new Float64Array(height);
  for(let x=0;x<width;x++)xs[x]=map.unproject(L.point(nw.x+(x+.5)/width*(se.x-nw.x),nw.y),0).lng;
  for(let y=0;y<height;y++)ys[y]=map.unproject(L.point(nw.x,nw.y+(y+.5)/height*(se.y-nw.y)),0).lat;
- const blended=$('blendColors').checked,rgb=paletteRgb(p),estimate=fastInterpolator(rows,reach,idwPower(),neighborCount());
+ let shaded=0;const blended=$('blendColors').checked,rgb=paletteRgb(p),estimate=fastInterpolator(rows,reach,idwPower(),neighborCount());
  for(let y=0;y<height;){
   const end=Math.min(y+8,height);
-  for(;y<end;y++)for(let x=0;x<width;x++){const i=(y*width+x)*4;if(mask&&!mask[i+3])continue;const v=estimate(ys[y],xs[x]);if(v===null||(kind==='rain'&&v<.01))continue;values[y*width+x]=v;let ci=0;while(ci+1<rgb.length&&v>=rgb[ci+1][0])ci++;const c=rgb[ci],b=rgb[Math.min(ci+1,rgb.length-1)],t=blended&&b[0]>c[0]?Math.max(0,Math.min(1,(v-c[0])/(b[0]-c[0]))):0;pixels.data[i]=Math.round(c[1]+(b[1]-c[1])*t);pixels.data[i+1]=Math.round(c[2]+(b[2]-c[2])*t);pixels.data[i+2]=Math.round(c[3]+(b[3]-c[3])*t);pixels.data[i+3]=mask?mask[i+3]:255;}
+  for(;y<end;y++)for(let x=0;x<width;x++){const i=(y*width+x)*4;if(mask&&!mask[i+3])continue;const v=estimate(ys[y],xs[x]);if(v===null||(kind==='rain'&&v<.01))continue;values[y*width+x]=v;shaded++;let ci=0;while(ci+1<rgb.length&&v>=rgb[ci+1][0])ci++;const c=rgb[ci],b=rgb[Math.min(ci+1,rgb.length-1)],t=blended&&b[0]>c[0]?Math.max(0,Math.min(1,(v-c[0])/(b[0]-c[0]))):0;pixels.data[i]=Math.round(c[1]+(b[1]-c[1])*t);pixels.data[i+1]=Math.round(c[2]+(b[2]-c[2])*t);pixels.data[i+2]=Math.round(c[3]+(b[3]-c[3])*t);pixels.data[i+3]=mask?mask[i+3]:255;}
   // Yield between strips so drag/zoom and the controls stay responsive.
   await new Promise(resolve=>setTimeout(resolve,0));if(token!==renderToken)return;
  }
- ctx.putImageData(pixels,0,0);canvas=out;overlayBounds=b;fillKey=key;fillField={values,width,height,xs,ys};
- if($('fill').checked)installFill();status('Map ready. Panning reuses the cached interpolation.');
+ ctx.putImageData(pixels,0,0);canvas=out;overlayBounds=b;fillKey=key;fillField={values,width,height,xs,ys,shaded};
+ if($('fill').checked)installFill();status(showFillStatus(rows,shaded));
 }
 function draw(){
  renderPshVariables();syncContourControls();if(!data){renderToken++;return;}points.clearLayers();
@@ -243,13 +255,13 @@ function draw(){
  rows.forEach(r=>{const dot=L.circleMarker([r.lat,displayLon(r.lon)],{pane:'reportPoints',renderer:reportRenderer,radius:dotRadius(),color:'#263344',weight:1,fillColor:color(r.value,p),fillOpacity:1,bubblingMouseEvents:false});dot.on('click',()=>{if($('editMode').checked){const loaded=data;setTimeout(()=>{if(data===loaded)removeReport(r.id);},0);}else dot.openPopup();});if(!$('editMode').checked)dot.bindPopup('<b>'+esc(r.name)+'</b><br>'+r.value+' '+r.unit+'<br>'+esc(r.provider)+' '+esc(r.time)+' '+esc(r.reportCode)+'<br>'+esc(r.locationSource)+(r.qualityFlag?'<br>PSH flag: '+esc(r.qualityFlag)+' — '+esc(r.qualityVariables):'')+(r.siteId?'<br>Station: '+esc(r.siteId):''));dot.addTo(points);if($('labels').checked)L.marker([r.lat,displayLon(r.lon)],{pane:'reportValues',interactive:false,icon:L.divIcon({className:'value-label',html:'<span style="font-size:'+valueFontSize()+'px">'+r.value+'</span>',iconAnchor:[-(dotRadius()+3),valueFontSize()/2],iconSize:[80,valueFontSize()+4]})}).addTo(points);});
  $('legend').innerHTML='<h3>'+esc(officeCode()+' • '+groupLabel($('kind').value))+'</h3><div class="legend-small">'+esc(data.headline)+'<br>'+esc(data.issued)+'</div><hr>'+($('blendColors').checked?'<div style="height:18px;border-radius:4px;margin-bottom:10px;background:linear-gradient(to right,'+p.map(s=>s[1]+' '+((s[0]-p[0][0])/(p[p.length-1][0]-p[0][0])*100)+'%').join(',')+')"></div>':'')+p.map((s,i)=>'<div class="legend-row"><span class="swatch" style="background:'+s[1]+'"></span>'+legendNumber(s[0])+(i===p.length-1?'+':'–'+legendNumber(p[i+1][0]))+' '+reportUnit()+'</div>').join('')+'<hr><div class="legend-small">Located reports: '+rows.length+'/'+all.length+'<br>IDW estimates • not observed everywhere<br>Blank areas: insufficient nearby reports</div>';
 
- if(!$('fill').checked||rows.length<3||($('clip').checked&&!boundary)){renderToken++;fillBuild=null;clearContours();if(overlay){map.removeLayer(overlay);overlay=null;}status(rows.length+' of '+all.length+' reports plotted. '+(rows.length<3?'At least 3 located reports are needed for interpolation.':''));return;}
+ if(!$('fill').checked||rows.length<3){renderToken++;fillBuild=null;clearContours();if(overlay){map.removeLayer(overlay);overlay=null;}status(showFillStatus(rows));return;}
  const key=JSON.stringify([contextEpoch,!!boundary,$('kind').value,reach,$('blendColors').checked,reportUnit(),idwPower(),neighborCount(),$('clip').checked,$('fillQuality').value,rows.map(r=>[r.lat,r.lon,r.value])]);
- if(key===fillKey&&canvas){if(fillBuild){renderToken++;fillBuild=null;}if(!overlay)installFill();else overlay.setOpacity(fillOpacity());requestContours();return;}
+ if(key===fillKey&&canvas){if(fillBuild){renderToken++;fillBuild=null;}if(!overlay)installFill();else overlay.setOpacity(fillOpacity());showFillStatus(rows,fillField?.shaded);requestContours();return;}
  if(fillBuild?.key===key)return;
  clearContours();if(overlay){map.removeLayer(overlay);overlay=null;}
- const token=++renderToken;fillBuild={key,token};status('Building sharp interpolation…');
- buildFill(rows,kind,p,reach,key,token).catch(e=>{if(token===renderToken)status('Fill rendering failed: '+e.message);}).finally(()=>{if(fillBuild?.token===token){fillBuild=null;requestContours();}});
+ const token=++renderToken;fillBuild={key,token};status(showFillStatus(rows));
+ buildFill(rows,kind,p,reach,key,token).catch(e=>{if(token===renderToken){$('fillStatus').textContent='Fill rendering failed: '+e.message;status('Fill rendering failed: '+e.message);}}).finally(()=>{if(fillBuild?.token===token){fillBuild=null;requestContours();}});
 }
 $('contours').onchange=()=>{if(!data&&globalThis.DatOverlay?.selected().length){if($('contours').checked)DatOverlay.plotDensity();else{$('datDensityOn').checked=false;$('datDensityOn').dispatchEvent(new Event('change'));}return;}requestContours();};$('pressureContourStep').onchange=requestContours;
 ['kind','power','neighbors','reach','fill','blendColors','labels','clip','fillQuality'].forEach(id=>$(id).onchange=()=>{if(id==='kind'){selected=null;$('editor').hidden=true;renderList();}draw();});map.on('moveend',()=>{clearTimeout(drawTimer);drawTimer=setTimeout(renderCities,80);});
