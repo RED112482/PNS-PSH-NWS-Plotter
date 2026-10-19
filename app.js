@@ -5,6 +5,8 @@ $('menuToggle').onclick=()=>{const collapsed=$('appLayout').classList.toggle('me
 let basemap;
 function changeBasemap(){if(basemap)map.removeLayer(basemap);const gray=$('basemapStyle').value==='gray';basemap=L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/'+(gray?'Canvas/World_Light_Gray_Base':'World_Street_Map')+'/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles © Esri & contributors | City data: U.S. Census Bureau, 2020',maxNativeZoom:gray?16:19,maxZoom:19,keepBuffer:4,updateWhenIdle:true}).addTo(map);basemap.on('tileerror',()=>{$('cityStatus').textContent='Basemap tile unavailable. Report and city layers remain usable.';});}
 $('basemapStyle').onchange=changeBasemap;changeBasemap();
+map.createPane('referenceOutlines');map.getPane('referenceOutlines').style.zIndex=600;map.getPane('referenceOutlines').style.pointerEvents='none';
+const outlineRenderer=L.svg({pane:'referenceOutlines'});
 map.createPane('contourLines');map.getPane('contourLines').style.zIndex=560;map.getPane('contourLines').style.pointerEvents='none';
 map.createPane('reportPoints');map.getPane('reportPoints').style.zIndex=650;
 map.createPane('reportValues');map.getPane('reportValues').style.zIndex=660;map.getPane('reportValues').style.pointerEvents='none';
@@ -324,20 +326,26 @@ function unwrapOffice(g){if(!wrapOffice)return g;function walk(a){if(typeof a[0]
 function officeCode(){const o=$('office').value.trim().toUpperCase();if(!/^[A-Z]{3}$/.test(o))throw Error('Enter a three-letter NWS office.');return o;}
 function sourceUrl(office,version=1){return 'https://forecast.weather.gov/product.php?site='+office+'&issuedby='+office+'&product=PNS&format=txt&version='+version+'&glossary=0';}
 function updateOfficeSource(){const o=officeCode();$('office').value=o;$('nwsLink').href=sourceUrl(o);}
-function showCountyLayer(){if(countyLayer){map.removeLayer(countyLayer);countyLayer=null;}if(!$('counties').checked||!countyData)return;countyLayer=L.geoJSON(countyData,{interactive:false,style:{color:'#000000',weight:1,fill:false},onEachFeature:(f,l)=>l.bindTooltip(esc((f.properties.countyname||'')+', '+(f.properties.state||'')))}).addTo(map);if(boundaryLayer)boundaryLayer.bringToFront();}
+function showCountyLayer(){if(countyLayer){map.removeLayer(countyLayer);countyLayer=null;}if(!$('counties').checked||!countyData)return;countyLayer=L.geoJSON(countyData,{pane:'referenceOutlines',renderer:outlineRenderer,interactive:false,style:{color:'#000000',weight:1.3,fill:false},onEachFeature:(f,l)=>l.bindTooltip(esc((f.properties.countyname||'')+', '+(f.properties.state||'')))}).addTo(map);if(boundaryLayer)boundaryLayer.bringToFront();}
 $('counties').onchange=showCountyLayer;
 async function loadOfficeMap(office){
  const epoch=++contextEpoch;contextOffice=office;boundary=null;countyData=null;wrapOffice=false;cities=office==='MOB'?mobCityFallback:[];
  if(boundaryLayer){map.removeLayer(boundaryLayer);boundaryLayer=null;}showCountyLayer();renderCities();if(data)draw();
+ $('outlineStatus').textContent='Loading county and CWA outlines…';
  try{
-  const b=await call('getBoundary',office);if(epoch!==contextEpoch)return;wrapOffice=spansDateline(b);boundary=unwrapOffice(b);boundaryLayer=L.geoJSON(boundary,{interactive:false,style:{color:'#e73d42',weight:2,fill:false}}).addTo(map);map.fitBounds(boundaryLayer.getBounds());draw();
-  const bounds=boundaryLayer.getBounds(),rect=[bounds.getWest(),bounds.getSouth(),bounds.getEast(),bounds.getNorth()];
-  const results=await Promise.allSettled([call('getCounties',office),call('getCities',rect)]);if(epoch!==contextEpoch)return;
-  if(results[0].status==='fulfilled'){countyData=unwrapOffice(results[0].value);showCountyLayer();}
-  if(results[1].status==='fulfilled'){cities=results[1].value;renderCities();}
-  $('cityStatus').textContent=results.map((r,i)=>r.status==='rejected'?(i===0?'County':'City')+' layer unavailable: '+r.reason.message:'').filter(Boolean).join(' ');draw();
- }catch(e){if(epoch!==contextEpoch)return;$('cityStatus').textContent='Office boundary unavailable: '+e.message;draw();}
+  // A failed CWA query must not prevent county retrieval.
+  const results=await Promise.allSettled([call('getBoundary',office),call('getCounties',office)]);if(epoch!==contextEpoch)return;
+  const errors=[];
+  if(results[0].status==='fulfilled'){const b=results[0].value;wrapOffice=spansDateline(b);boundary=unwrapOffice(b);boundaryLayer=L.geoJSON(boundary,{pane:'referenceOutlines',renderer:outlineRenderer,interactive:false,style:{color:'#e73d42',weight:2,fill:false}}).addTo(map);map.fitBounds(boundaryLayer.getBounds());}
+  else errors.push('CWA outline unavailable: '+results[0].reason.message);
+  if(results[1].status==='fulfilled'&&results[1].value.features?.length){countyData=unwrapOffice(results[1].value);showCountyLayer();}
+  else errors.push('County outlines unavailable: '+(results[1].status==='rejected'?results[1].reason.message:'no county geometry returned'));
+  $('outlineStatus').textContent=(countyData?countyData.features.length+' county outlines loaded. ':'')+errors.join(' ');draw();
+  const bounds=(boundaryLayer||countyLayer)?.getBounds();
+  if(bounds){try{cities=await call('getCities',[bounds.getWest(),bounds.getSouth(),bounds.getEast(),bounds.getNorth()]);if(epoch!==contextEpoch)return;renderCities();$('cityStatus').textContent='';}catch(e){if(epoch!==contextEpoch)return;$('cityStatus').textContent='City layer unavailable: '+e.message;}}
+ }catch(e){if(epoch!==contextEpoch)return;$('outlineStatus').textContent='Outline display failed: '+e.message;draw();}
 }
+$('reloadOutlines').onclick=()=>loadOfficeMap(officeCode());
 function updateProductList(){
  $('availablePns').innerHTML=scannedProducts.map(p=>'<option value="'+p.version+'" '+(p.error?'disabled':'')+'>'+esc('v'+p.version+' • '+(p.count?'✓ '+p.count+' metadata records':p.status)+' • '+p.issued+' • '+p.headline)+'</option>').join('');
  const good=scannedProducts.find(p=>p.count>0);if(good)$('availablePns').value=String(good.version);
